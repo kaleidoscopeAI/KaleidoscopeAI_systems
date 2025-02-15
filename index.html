@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kaleidoscope AI - ArtificialThinker.com</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Kaleidoscope AI Platform</h1>
+            <p>artificialthinker.com</p>
+        </header>
+
+        <div class="main-content">
+            <div class="visualization-pane" id="cubeVisualization">
+                <!-- 3D Visualization will be rendered here -->
+            </div>
+
+            <div class="control-panel">
+                <div class="data-upload">
+                    <h2>Data Ingestion</h2>
+                    <input type="file" id="dataFile" accept=".csv,.parquet,.json">
+                    <button onclick="handleUpload()">Upload & Process</button>
+                    <div id="uploadStatus"></div>
+                </div>
+
+                <div class="chat-interface">
+                    <h2>AI Conversation</h2>
+                    <div id="chatHistory"></div>
+                    <input type="text" id="userInput" placeholder="Ask about molecules or financial trends...">
+                    <button onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='scripts.js') }}"></script>
+</body>
+</html>

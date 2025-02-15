@@ -1,0 +1,203 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Kaleidoscope AI Deployment with ECS Fargate, CloudWatch Logging, S3 for visualizations,
+  and Route 53 DNS records for artificialthinker.com.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC where the ECS service will be deployed.
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets for ECS tasks and ALB.
+  DomainName:
+    Type: String
+    Default: artificialthinker.com
+    Description: Domain name to configure.
+  HostedZoneId:
+    Type: String
+    Description: The Hosted Zone ID for your domain.
+  ALBListenerPort:
+    Type: Number
+    Default: 80
+    Description: Port on which the ALB listens.
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: kaleidoscope-visuals
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: kaleidoscope-ai-cluster
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - s3:GetObject
+                Resource: "*"
+
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/kaleidoscope-ai
+      RetentionInDays: 30
+
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: kaleidoscope-ai-task
+      Cpu: 512
+      Memory: 1024
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: kaleidoscope-ai
+          Image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/kaleidoscope-ai:latest
+          PortMappings:
+            - ContainerPort: 8080
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/kaleidoscope-ai
+              awslogs-region: us-east-1
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: VISUALIZATION_DIR
+              Value: "/app/results/visualizations/"
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: kaleidoscope-alb
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: kaleidoscope-target
+      Port: 8080
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: ip
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Protocol: HTTP
+      Port: !Ref ALBListenerPort
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP access for the ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSCluster
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref SubnetIds
+          AssignPublicIp: ENABLED
+      LoadBalancers:
+        - TargetGroupArn: !Ref ALBTargetGroup
+          ContainerName: kaleidoscope-ai
+          ContainerPort: 8080
+
+  DNSRecordA:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "${DomainName}."
+      Type: A
+      TTL: "300"
+      AliasTarget:
+        DNSName: !GetAtt ALB.DNSName
+        HostedZoneId: "Z35SXDOTRQ7X7"  # Update to your ALB's hosted zone ID
+
+  DNSRecordWWW:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "www.${DomainName}."
+      Type: CNAME
+      TTL: "300"
+      ResourceRecords:
+        - !Ref DomainName
+
+  DNSRecordPay:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "pay.${DomainName}."
+      Type: CNAME
+      TTL: "300"
+      ResourceRecords:
+        - "paylinks.commerce.godaddy.com."
+
+Outputs:
+  LoadBalancerDNS:
+    Description: "The DNS name of the ALB"
+    Value: !GetAtt ALB.DNSName
+  ECSClusterARN:
+    Description: "ARN of the ECS Cluster"
+    Value: !Ref ECSCluster
+  ECRRepositoryURI:
+    Description: "ECR Repository URI"
+    Value: "123456789012.dkr.ecr.us-east-1.amazonaws.com/kaleidoscope-ai"
+  S3BucketName:
+    Description: "Name of the S3 bucket for visualizations"
+    Value: !Ref S3Bucket
